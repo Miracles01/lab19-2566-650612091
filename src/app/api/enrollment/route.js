@@ -1,179 +1,148 @@
-import { DB, readDB, writeDB } from "@/libs/DB";
-import { checkToken } from "@/libs/checkToken";
-import { NextResponse } from "next/server";
-import sleep from "sleep-promise";
+"use client";
+import { Footer } from "@/components/Footer";
+import {
+  Button,
+  Container,
+  Group,
+  Loader,
+  Paper,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
+import axios from "axios";
+import { useEffect, useState } from "react";
 
-export const GET = async (request) => {
-  const payload = checkToken();
-  if (!payload) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "Invalid token",
-      },
-      { status: 401 }
-    );
-  }
-  const { role, studentId } = payload;
+export default function Home() {
+  //All courses state
+  const [courses, setCourses] = useState(null);
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  //login state
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [token, setToken] = useState(null);
+  const [authenUsername, setAuthenUsername] = useState(null);
+  const [loadingLogin, setLoadingLogin] = useState(false);
+  //my courses state
+  const [myCourses, setMyCourses] = useState(null);
+  const [loadingMyCourses, setLoadingMyCourses] = useState(false);
 
-  readDB();
-  if (role === "ADMIN") {
-    return NextResponse.json({
-      ok: true,
-      enrollments: DB.enrollments,
+  const loadCourses = async () => {
+    setLoadingCourses(true);
+    const resp = await axios.get("/api/course");
+    setCourses(resp.data.courses);
+    setloadingCourses(false);
+  };
+
+  const loadMyCourses = async () => {
+    setLoadingMyCourses(true);
+    const resp = await axios.get("/api/enrollment", {
+      headers: { Authorization: `Bearer ${token}` },
     });
-  }
+    setMyCourses(resp.data.courses);
+    setLoadingMyCourses(false);
+  };
 
-  const courseNoList = [];
-  for (const enroll of DB.enrollments) {
-    if (enroll.studentId === studentId) {
-      courseNoList.push(enroll.courseNo);
+  useEffect(() => {
+    loadCourses();
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+
+    loadMyCourses();
+  }, [token]);
+
+  const login = async () => {
+    setLoadingLogin(true);
+    try {
+      const resp = await axios.post("/api/user/login", { username, password });
+      setToken(resp.data.token);
+      setAuthenUsername(resp.data.username);
+      setUsername("");
+      setPassword("");
+    } catch (error) {
+      if (error.response.data) {
+        alert(error.response.data.message);
+      }
     }
-  }
+    setLoadingLogin(false);
+  };
 
-  const courses = [];
-  for (const courseNo of courseNoList) {
-    const course = DB.courses.find((x) => x.courseNo === courseNo);
-    courses.push(course);
-  }
+  const logout = () => {
+    setAuthenUsername(null);
+    setToken(null);
+    setMyCourses(null);
+  };
 
-  await sleep(1000);
+  return (
+    <Container size="sm">
+      <Title italic align="center" color="violet" my="xs">
+        Course Enrollment
+      </Title>
+      <Stack>
+        {/* all courses section */}
+        <Paper withBorder p="md">
+          <Title order={4}>All courses</Title>
+          {loadingCourses && !courses && <Loader variant="dots" />}
+          {courses &&
+            courses.map((course) => (
+              <Text key={course.courseNo}>
+                {course.courseNo} - {course.title}
+              </Text>
+            ))}
+        </Paper>
 
-  return NextResponse.json({
-    ok: true,
-    courses,
-  });
-};
+        {/* log in section */}
+        <Paper withBorder p="md">
+          <Title order={4}>Login</Title>
+          {!authenUsername && (
+            <Group align="flex-end">
+              <TextInput
+                label="Username"
+                onChange={(e) => setUsername(e.target.value)}
+                value={username}
+              />
+              <TextInput
+                label="Password"
+                onChange={(e) => setPassword(e.target.value)}
+                value={password}
+              />
+              <Button disabled={loadingLogin} onClick={login}>
+                {loadingLogin ? "Login..." : "Login"}
+              </Button>
+            </Group>
+          )}
+          {authenUsername && (
+            <Group>
+              <Text fw="bold">Hi {authenUsername}!</Text>
+              <Button color="red" onClick={logout}>
+                Logout
+              </Button>
+            </Group>
+          )}
+        </Paper>
 
-export const POST = async (request) => {
-  const payload = checkToken();
-  if (!payload) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "Invalid token",
-      },
-      { status: 401 }
-    );
-  }
-  const { role, studentId } = payload;
+        {/* enrollment section */}
+        <Paper withBorder p="md">
+          <Title order={4}>My courses</Title>
+          {!authenUsername && (
+            <Text color="dimmed">Please login to see your course(s)</Text>
+          )}
+          {authenUsername &&
+            myCourses &&
+            myCourses.map((course) => (
+              <Text key={course.courseNo}>
+                {course.courseNo} - {course.title}
+              </Text>
+            ))}
 
-  if (role === "ADMIN") {
-    return NextResponse.json(
-      {
-        ok: true,
-        message: "Only Student can access this API route",
-      },
-      { status: 403 }
-    );
-  }
-
-  //read body request
-  const body = await request.json();
-  const { courseNo } = body;
-  if (typeof courseNo !== "string" || courseNo.length !== 6) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "courseNo must contain 6 characters",
-      },
-      { status: 400 }
-    );
-  }
-
-  readDB();
-  const foundCourse = DB.courses.find((x) => x.courseNo === courseNo);
-  if (!foundCourse) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "courseNo does not exist",
-      },
-      { status: 400 }
-    );
-  }
-
-  const foundEnroll = DB.enrollments.find(
-    (x) => x.studentId === studentId && x.courseNo === courseNo
+          {/* Do something with below loader!! */}
+          {loadingMyCourses && <Loader variant="dots" />}
+        </Paper>
+        <Footer year="2023" fullName="Pongporn Seetong" studentId="650612091" />
+      </Stack>
+    </Container>
   );
-  if (foundEnroll) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "You already enrolled that course",
-      },
-      { status: 400 }
-    );
-  }
-
-  DB.enrollments.push({
-    studentId,
-    courseNo,
-  });
-  writeDB();
-
-  return NextResponse.json({
-    ok: true,
-    message: "You has enrolled a course successfully",
-  });
-};
-
-export const DELETE = async (request) => {
-  const payload = checkToken();
-  if (!payload) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "Invalid token",
-      },
-      { status: 401 }
-    );
-  }
-  const { role, studentId } = payload;
-
-  if (role === "ADMIN") {
-    return NextResponse.json(
-      {
-        ok: true,
-        message: "Only Student can access this API route",
-      },
-      { status: 403 }
-    );
-  }
-
-  //read body request
-  const body = await request.json();
-  const { courseNo } = body;
-  if (typeof courseNo !== "string" || courseNo.length !== 6) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "courseNo must contain 6 characters",
-      },
-      { status: 400 }
-    );
-  }
-
-  readDB();
-  const foundIndex = DB.enrollments.findIndex(
-    (x) => x.studentId === studentId && x.courseNo === courseNo
-  );
-  if (foundIndex === -1) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          "You cannot drop from this course. You have not enrolled it yet!",
-      },
-      { status: 404 }
-    );
-  }
-
-  DB.enrollments.splice(foundIndex, 1);
-  writeDB();
-
-  return NextResponse.json({
-    ok: true,
-    message: "You has dropped from this course. See you next semester.",
-  });
-};
+}
